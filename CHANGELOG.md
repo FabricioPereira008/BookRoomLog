@@ -2,7 +2,7 @@
 
 Todas as mudanças relevantes do BookRoomLog ficam registradas aqui.
 
-## [Não lançado]
+## [0.1.1] - 2026-10-25
 
 ### Adicionado
 - **Preencher automaticamente** no cadastro: busca o livro (ISBN, ou título + autor) e completa só os campos vazios — autor, gênero, série e volume, editora, páginas, idioma, ISBN e capa — com o resultado mais seguro, mostrando o que foi preenchido.

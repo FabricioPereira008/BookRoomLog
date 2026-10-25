@@ -4,7 +4,10 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from backend.app.core.database import get_db
 from backend.app.models.book import BookStatus
-from backend.app.schemas.book import BookBrief, BookCreate, BookResponse, BookUpdate, NextOrderRequest
+from backend.app.schemas.book import (
+    AutofillResponse, BookBrief, BookCreate, BookResponse, BookUpdate, NextOrderRequest,
+)
+from backend.app.services.autofill_service import autofill_book
 from backend.app.services.book_service import BookService, NextOrderError, RereadLinkError
 
 router = APIRouter()
@@ -13,6 +16,10 @@ NOT_FOUND = "Livro não encontrado"
 
 class RereadRequest(BaseModel):
     status: BookStatus = BookStatus.LENDO
+
+
+class AutofillRequest(BaseModel):
+    api_key: Optional[str] = None
 
 
 @router.get("/", response_model=List[BookResponse])
@@ -78,6 +85,14 @@ def create_reread(book_id: int, payload: RereadRequest = RereadRequest(), db: Se
     if not book:
         raise HTTPException(status_code=404, detail=NOT_FOUND)
     return book
+
+@router.post("/{book_id}/autofill", response_model=AutofillResponse)
+async def autofill(book_id: int, payload: AutofillRequest = AutofillRequest(), db: Session = Depends(get_db)):
+    """Completa os campos vazios (autor, gênero, série, editora, páginas, idioma, ISBN, capa) pela busca online."""
+    result = await autofill_book(db, book_id, payload.api_key)
+    if result is None:
+        raise HTTPException(status_code=404, detail=NOT_FOUND)
+    return result
 
 @router.delete("/{book_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_book(book_id: int, db: Session = Depends(get_db)):

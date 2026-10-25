@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
 from app_version import __version__
 from frontend_desktop import preferences
 from frontend_desktop.api_client.client import api_client
+from frontend_desktop.data_quality import autofill_gaps
 from frontend_desktop.styles.tokens import COLORS
 from frontend_desktop.ui_helpers import set_button_icon, set_status
 from frontend_desktop.views.components.settings_tabs import ShortcutsTab, restore_button, settings_group, settings_page
@@ -77,6 +78,46 @@ class CoverFetcherThread(QThread):
         except Exception:
             logger.exception("Erro no worker de capas")
             self.batch_finished.emit(0, 0)
+
+
+class AutofillThread(QThread):
+    """Completa, um livro por vez, os dados vazios dos livros cadastrados (busca online)."""
+    progress_updated = Signal(int, int, str, list)  # atual, total, título, campos preenchidos
+    batch_finished = Signal(int, int, int)  # total verificado, completados, sem resultado
+
+    def __init__(self, api_key: str = "", parent=None):
+        super().__init__(parent)
+        self.api_key = api_key
+        self.is_running = True
+
+    def stop(self):
+        self.is_running = False
+
+    def run(self):
+        total = completed = not_found = 0
+        try:
+            pending = [b for b in api_client.get_books() if autofill_gaps(b)]
+            total = len(pending)
+            for idx, book in enumerate(pending):
+                if not self.is_running:
+                    total = idx
+                    break
+                filled = []
+                try:
+                    result = api_client.autofill_book(book["id"], self.api_key or None)
+                    filled = result.get("filled") or []
+                    if result.get("source") is None:
+                        not_found += 1
+                except Exception as e:
+                    not_found += 1
+                    logger.warning("Erro ao completar os dados de %s: %s", book.get("title"), e)
+                if filled:
+                    completed += 1
+                self.progress_updated.emit(idx + 1, len(pending), book.get("title", ""), filled)
+                time.sleep(0.3)  # respeita a cota das APIs e permite parar a qualquer momento
+        except Exception:
+            logger.exception("Erro no preenchimento automático em lote")
+        self.batch_finished.emit(total, completed, not_found)
 
 
 class SettingsView(QWidget):
@@ -233,6 +274,39 @@ class SettingsView(QWidget):
         self.lbl_cover_status.setVisible(False)
         batch_layout.addWidget(self.lbl_cover_status)
         layout.addWidget(batch_group)
+
+        fill_group, fill_layout = self._group(
+            "Completar dados faltantes",
+            "Procura, um livro por vez, os livros com autor, gênero, editora, páginas, idioma, ISBN ou capa em branco "
+            "e completa só o que está vazio (o que você já preencheu nunca é trocado). Livros sem um resultado "
+            "seguro ficam como estão. Os nomes de série vêm como a Open Library cadastra (às vezes em inglês) "
+            "e podem ser renomeados na página Séries.",
+        )
+        fill_row = QHBoxLayout()
+        self.btn_autofill = QPushButton("Completar dados faltantes")
+        set_button_icon(self.btn_autofill, "wand-sparkles", COLORS["on_accent"])
+        self.btn_autofill.setProperty("class", "action-btn")
+        self.btn_autofill.setCursor(Qt.PointingHandCursor)
+        self.btn_autofill.clicked.connect(self.start_autofill)
+        fill_row.addWidget(self.btn_autofill)
+        self.btn_stop_autofill = QPushButton("Parar")
+        set_button_icon(self.btn_stop_autofill, "pause", COLORS["text"])
+        self.btn_stop_autofill.setProperty("class", "cancel-btn")
+        self.btn_stop_autofill.setCursor(Qt.PointingHandCursor)
+        self.btn_stop_autofill.setVisible(False)
+        self.btn_stop_autofill.clicked.connect(self.stop_autofill)
+        fill_row.addWidget(self.btn_stop_autofill)
+        fill_row.addStretch()
+        fill_layout.addLayout(fill_row)
+        self.autofill_progress_bar = QProgressBar()
+        self.autofill_progress_bar.setVisible(False)
+        fill_layout.addWidget(self.autofill_progress_bar)
+        self.lbl_autofill_status = QLabel("")
+        self.lbl_autofill_status.setWordWrap(True)
+        self.lbl_autofill_status.setVisible(False)
+        fill_layout.addWidget(self.lbl_autofill_status)
+        layout.addWidget(fill_group)
+        self.autofill_thread = None
 
         cleanup_group, cleanup_layout = self._group(
             "Capas sem uso",
@@ -520,6 +594,45 @@ class SettingsView(QWidget):
         
         # Um único refresh ao final do lote (e não um por capa baixada)
         self.data_imported.emit()
+
+    # --- completar dados faltantes ---
+    def start_autofill(self):
+        if self.autofill_thread and self.autofill_thread.isRunning():
+            return
+        self.autofill_thread = AutofillThread(api_key=preferences.google_books_key())
+        self.autofill_thread.progress_updated.connect(self.on_autofill_progress)
+        self.autofill_thread.batch_finished.connect(self.on_autofill_finished)
+        self.btn_autofill.setEnabled(False)
+        self.btn_stop_autofill.setVisible(True)
+        self.autofill_progress_bar.setValue(0)
+        self.autofill_progress_bar.setVisible(True)
+        set_status(self.lbl_autofill_status, "muted", "Procurando os livros com dados faltando...")
+        self.lbl_autofill_status.setVisible(True)
+        self.autofill_thread.start()
+
+    def stop_autofill(self):
+        if self.autofill_thread and self.autofill_thread.isRunning():
+            self.autofill_thread.stop()
+            set_status(self.lbl_autofill_status, "muted", "Parando depois do livro atual...")
+            self.btn_stop_autofill.setEnabled(False)
+
+    def on_autofill_progress(self, current: int, total: int, title: str, filled: list):
+        if total:
+            self.autofill_progress_bar.setValue(int(current / total * 100))
+        detail = f"preenchido: {', '.join(filled)}" if filled else "nada novo"
+        set_status(self.lbl_autofill_status, "ok" if filled else "muted", f"[{current}/{total}] {title} — {detail}")
+
+    def on_autofill_finished(self, total: int, completed: int, not_found: int):
+        self.btn_autofill.setEnabled(True)
+        self.btn_stop_autofill.setVisible(False)
+        self.btn_stop_autofill.setEnabled(True)
+        self.autofill_progress_bar.setVisible(False)
+        if total == 0:
+            set_status(self.lbl_autofill_status, "ok", "Nenhum livro com dados faltando.")
+            return
+        set_status(self.lbl_autofill_status, "ok",
+                   f"Concluído: {completed} de {total} livro(s) completado(s); {not_found} sem resultado seguro.")
+        self.data_imported.emit()  # um único refresh ao final do lote
 
     def save_google_key(self):
         preferences.set_google_books_key(self.input_google_key.text())

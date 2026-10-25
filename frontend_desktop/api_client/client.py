@@ -145,6 +145,21 @@ class ApiClient:
         params = _clean({"title": title, "author": author, "isbn": isbn, "source": source, "api_key": api_key})
         return self._json("GET", "lookup/", timeout=LOOKUP_TIMEOUT, params=params)["results"]
 
+    def lookup_best(self, title: str = "", author: Optional[str] = None, isbn: Optional[str] = None,
+                    api_key: Optional[str] = None) -> Optional[Dict[str, Any]]:
+        """O resultado que com segurança é este livro (gêneros já traduzidos, série); None se não houver."""
+        params = _clean({"title": title, "author": author, "isbn": isbn, "api_key": api_key})
+        r = self._request("GET", "lookup/best", timeout=LOOKUP_TIMEOUT, params=params)
+        if r.status_code == 404:
+            return None
+        r.raise_for_status()
+        return r.json()
+
+    def autofill_book(self, book_id: int, api_key: Optional[str] = None) -> Dict[str, Any]:
+        """Completa os campos vazios do livro; devolve {"book", "filled", "source"}."""
+        return self._json("POST", f"books/{book_id}/autofill", timeout=LOOKUP_TIMEOUT * 2,
+                          json={"api_key": api_key} if api_key else {})
+
     # --- UPLOAD E DOWNLOAD DE CAPA ---
     def upload_cover(self, file_path: str) -> Optional[str]:
         path = Path(file_path)

@@ -89,7 +89,7 @@ def test_search_falls_back_to_open_library_on_error_or_empty():
     ol = respx.get(ls.OPEN_LIBRARY_URL).mock(return_value=httpx.Response(200, json=OPEN_LIBRARY_PAYLOAD))
     assert _run(ls.search_books("O Hobbit", author="Tolkien"))[0].source == ls.SOURCE_OPEN_LIBRARY
     params = ol.calls.last.request.url.params
-    assert params["title"] == "O Hobbit" and params["author"] == "Tolkien"
+    assert params["q"] == "O Hobbit Tolkien" and params["lang"] == "pt"
     _run(ls.search_books("", isbn="9788533615540"))
     assert ol.calls.last.request.url.params["isbn"] == "9788533615540"
 

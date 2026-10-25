@@ -154,30 +154,110 @@ def test_options_failure_and_save_failure(qapp, sync_async, no_popups):
     assert no_popups == ["critical"] and dialog.btn_save.isEnabled()
 
 
-def test_lookup_candidate_fills_form(qapp, backend, sync_async, monkeypatch):
+def test_candidate_fills_only_empty_fields(qapp, backend, sync_async, monkeypatch):
     dialog = BookDialog()
     downloads = []
     monkeypatch.setattr(dialog, "download_cover_url", downloads.append)
-    dialog.apply_candidate({"title": "O Hobbit", "authors": ["J.R.R. Tolkien"], "publisher": "HarperCollins",
-                            "pages": 336, "language": "Português", "isbn": "978", "cover_url": "https://x/c.jpg"},
-                           download_cover=True)
+    candidate = {"title": "O Hobbit", "authors": ["J.R.R. Tolkien"], "publisher": "HarperCollins", "pages": 336,
+                 "language": "Português", "isbn": "978", "cover_url": "https://x/c.jpg",
+                 "genres": ["Fantasia", "Infantojuvenil"], "series": "Terra-média", "series_number": 1}
+    filled = dialog.apply_candidate(candidate, download_cover=True)
+    assert filled == ["título", "autor", "gênero", "série", "editora", "páginas", "idioma", "ISBN", "capa"]
     assert dialog.input_title.text() == "O Hobbit" and dialog.input_authors.text() == "J.R.R. Tolkien"
+    assert (dialog.combo_genre.currentText(), dialog.combo_genre2.currentText()) == ("Fantasia", "Infantojuvenil")
+    assert dialog.combo_series.currentText() == "Terra-média" and dialog.spin_series_number.value() == 1
     assert dialog.combo_publisher.currentText() == "HarperCollins" and dialog.spin_pages.value() == 336
     assert dialog.input_isbn.text() == "978" and downloads == ["https://x/c.jpg"]
-    dialog.apply_candidate({"title": ""})
-    assert dialog.input_title.text() == "O Hobbit"
+
+    # Tudo já preenchido: nada é trocado
+    other = {"title": "Outro", "authors": ["X"], "publisher": "Y", "pages": 1, "language": "Inglês", "isbn": "1",
+             "genres": ["Terror"], "series": "Outra", "series_number": 5, "cover_url": "https://x/2.jpg"}
+    dialog.cover_filename = "capa.jpg"
+    assert dialog.apply_candidate(other, download_cover=True) == []
+    assert dialog.input_title.text() == "O Hobbit" and dialog.combo_genre.currentText() == "Fantasia"
+    assert dialog.spin_series_number.value() == 1
+
+    # Volume só entra se a série for a mesma
+    dialog.spin_series_number.setValue(0)
+    assert dialog.apply_candidate({"series": "Outra", "series_number": 3}) == []
+    assert dialog.apply_candidate({"series": "terra-média", "series_number": 3}) == ["volume"]
+    assert dialog.apply_candidate({"title": ""}) == []
+
+
+def test_lookup_dialog_result_is_applied(qapp, backend, sync_async, monkeypatch):
+    dialog = BookDialog()
+    dialog.input_title.setText("O Hobbit")
+    dialog.input_authors.setText("Tolkien")
 
     class FakeLookup:
         def __init__(self, title, author, isbn, parent):
             FakeLookup.args = (title, author, isbn)
-            self.selected = {"title": "Novo"}
+            self.selected = {"title": "Outro título", "pages": 300}
             self.download_cover = False
 
         def exec(self):
             return True
     monkeypatch.setattr(bd, "LookupDialog", FakeLookup)
     dialog.open_lookup()
-    assert FakeLookup.args == ("O Hobbit", "J.R.R. Tolkien", "978") and dialog.input_title.text() == "Novo"
+    assert FakeLookup.args == ("O Hobbit", "Tolkien", "")
+    assert dialog.input_title.text() == "O Hobbit" and dialog.spin_pages.value() == 300
+    assert "Preenchido: páginas" in dialog.lbl_autofill.text()
+
+
+def test_autofill_button(qapp, backend, sync_async, monkeypatch, no_popups):
+    from frontend_desktop import preferences
+    from frontend_desktop.api_client.client import api_client
+    dialog = BookDialog()
+    dialog.autofill()
+    assert no_popups == ["warning"]  # sem título nem ISBN
+
+    calls = []
+
+    def fake_best(title, author, isbn, api_key):
+        calls.append((title, author, isbn, api_key))
+        return {"source": "Open Library", "authors": ["Frank Herbert"], "genres": ["Ficção científica"]}
+    monkeypatch.setattr(api_client, "lookup_best", fake_best)
+    monkeypatch.setattr(dialog, "download_cover_url", lambda url: None)
+    preferences.set_google_books_key("chave")
+    dialog.input_title.setText("Duna")
+    dialog.autofill()
+    assert calls == [("Duna", None, None, "chave")]
+    assert dialog.input_authors.text() == "Frank Herbert" and dialog.combo_genre.currentText() == "Ficção científica"
+    assert "Preenchido (Open Library): autor, gênero" in dialog.lbl_autofill.text()
+    assert dialog.btn_autofill.isEnabled() and dialog.btn_autofill.text() == "Preencher automaticamente"
+
+    dialog.autofill()  # tudo que o resultado traz já está preenchido
+    assert "já estavam preenchidos" in dialog.lbl_autofill.text()
+
+    monkeypatch.setattr(api_client, "lookup_best", lambda *a: None)
+    dialog.autofill()
+    assert "Nada encontrado com segurança" in dialog.lbl_autofill.text()
+
+    def boom(*a):
+        raise RuntimeError("429")
+    monkeypatch.setattr(api_client, "lookup_best", boom)
+    dialog.autofill()
+    assert "A busca falhou" in dialog.lbl_autofill.text() and dialog.btn_autofill.isEnabled()
+
+
+def test_autofill_through_the_real_api(qapp, backend, sync_async, monkeypatch, add_book):
+    from backend.app.api.v1.endpoints import lookup
+    from backend.app.schemas.lookup import BookCandidate
+    add_book(title="Outro", genres=["fantasia"])
+
+    async def fake_find(title, author=None, isbn=None, api_key=None, existing_genres=()):
+        if title == "Desconhecido":
+            return None
+        return BookCandidate(source="Open Library", title=title, authors=["Tolkien"],
+                             genres=[g for g in existing_genres if g == "fantasia"])
+    monkeypatch.setattr(lookup.lookup_service, "find_best", fake_find)
+    dialog = BookDialog()
+    dialog.input_title.setText("O Hobbit")
+    dialog.autofill()
+    assert dialog.input_authors.text() == "Tolkien" and dialog.combo_genre.currentText() == "fantasia"
+    dialog.input_title.setText("Desconhecido")
+    dialog.autofill()
+    assert "Nada encontrado" in dialog.lbl_autofill.text()
 
 
 def test_cover_actions(qapp, backend, sync_async, monkeypatch, tmp_path, no_popups):

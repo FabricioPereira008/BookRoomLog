@@ -155,3 +155,20 @@ def test_backups(client, tmp_path):
     assert client.export_backup("b.db", str(target)) == str(target)
     assert target.read_bytes() == b"zipdata" and not (tmp_path / "saida.zip.part").exists()
     assert client.import_backup(str(target))["name"] == "i.db"
+
+
+@responses.activate
+def test_lookup_best_and_autofill(client):
+    best = responses.get(f"{BASE}/lookup/best", json={"title": "Duna"})
+    assert client.lookup_best("Duna", author="Herbert", api_key="k") == {"title": "Duna"}
+    assert best.calls[0].request.params == {"title": "Duna", "author": "Herbert", "api_key": "k"}
+    responses.replace(responses.GET, f"{BASE}/lookup/best", status=404, json={"detail": "x"})
+    assert client.lookup_best("Nada") is None
+    responses.replace(responses.GET, f"{BASE}/lookup/best", status=500, json={})
+    with pytest.raises(requests.HTTPError):
+        client.lookup_best("Erro")
+    fill = responses.post(f"{BASE}/books/3/autofill", json={"filled": ["autor"]})
+    assert client.autofill_book(3, "k") == {"filled": ["autor"]}
+    assert json.loads(fill.calls[0].request.body) == {"api_key": "k"}
+    client.autofill_book(3)
+    assert json.loads(fill.calls[1].request.body) == {}

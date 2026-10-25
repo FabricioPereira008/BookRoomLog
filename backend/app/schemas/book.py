@@ -93,3 +93,10 @@ class BookBrief(BaseModel):
 class NextOrderRequest(BaseModel):
     """Ordem completa da fila de Próximos (ids na ordem desejada)."""
     book_ids: List[int] = Field(default_factory=list)
+
+
+class AutofillResponse(BaseModel):
+    """Resultado do preenchimento automático: o livro (atualizado ou não) e o que foi completado."""
+    book: BookResponse
+    filled: List[str] = []
+    source: Optional[str] = None

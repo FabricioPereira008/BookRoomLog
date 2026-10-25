@@ -8,6 +8,7 @@ from PySide6.QtWidgets import (
     QMessageBox, QPushButton, QScrollArea, QSpinBox, QTextEdit, QVBoxLayout, QWidget,
 )
 
+from frontend_desktop import preferences
 from frontend_desktop.api_client.client import api_client
 from frontend_desktop.cover_loader import cover_loader
 from frontend_desktop.styles.tokens import COLORS
@@ -171,7 +172,8 @@ class BookDialog(CoverMixin, QDialog):
         title.setProperty("class", "view-title-large")
         subtitle = QLabel(
             "Altere as informações e salve." if self.is_edit
-            else "Preencha os dados ou use \"Buscar dados online\". Os campos com * são obrigatórios."
+            else "Digite o título e use \"Preencher automaticamente\" (ou escolha em \"Buscar dados online\"). "
+                 "Os campos com * são obrigatórios."
         )
         subtitle.setProperty("class", "settings-desc")
         main_layout.addWidget(title)
@@ -187,14 +189,29 @@ class BookDialog(CoverMixin, QDialog):
         self.input_title = QLineEdit()
         self.input_title.setPlaceholderText("Ex: O Nome do Vento")
         title_row.addWidget(self.input_title, 1)
+        self.btn_autofill = QPushButton("Preencher automaticamente")
+        self.btn_autofill.setProperty("class", "small-btn")
+        self.btn_autofill.setCursor(Qt.PointingHandCursor)
+        self.btn_autofill.setToolTip("Busca este livro e completa só os campos vazios (autor, gênero, série, editora, "
+                                     "páginas, idioma, ISBN e capa) com o resultado mais seguro")
+        set_button_icon(self.btn_autofill, "wand-sparkles")
+        self.btn_autofill.clicked.connect(self.autofill)
+        title_row.addWidget(self.btn_autofill)
         self.btn_lookup = QPushButton("Buscar dados online")
         self.btn_lookup.setProperty("class", "small-btn")
         self.btn_lookup.setCursor(Qt.PointingHandCursor)
-        self.btn_lookup.setToolTip("Preenche autor, editora, páginas, ISBN e capa pelo Google Books / Open Library")
+        self.btn_lookup.setToolTip("Mostra os resultados do Google Books / Open Library para você escolher")
         set_button_icon(self.btn_lookup, "search")
         self.btn_lookup.clicked.connect(self.open_lookup)
         title_row.addWidget(self.btn_lookup)
-        grid.addWidget(self._field("Título", title_row, required=True), 0, 0, 1, 2)
+        title_box = QVBoxLayout()
+        title_box.setSpacing(4)
+        title_box.addLayout(title_row)
+        self.lbl_autofill = QLabel("")
+        self.lbl_autofill.setWordWrap(True)
+        self.lbl_autofill.setVisible(False)
+        title_box.addWidget(self.lbl_autofill)
+        grid.addWidget(self._field("Título", title_box, required=True), 0, 0, 1, 2)
 
         self.input_authors = QLineEdit()
         self.input_authors.setPlaceholderText("Separe vários autores com vírgula")
@@ -495,24 +512,90 @@ class BookDialog(CoverMixin, QDialog):
         dialog = LookupDialog(self.input_title.text().strip(), authors[0] if authors else "",
                               self.input_isbn.text().strip(), self)
         if dialog.exec() and dialog.selected:
-            self.apply_candidate(dialog.selected, download_cover=dialog.download_cover)
+            self.show_filled(self.apply_candidate(dialog.selected, download_cover=dialog.download_cover))
 
-    def apply_candidate(self, candidate: dict, download_cover: bool = False) -> None:
-        """Preenche o formulário com um resultado da busca online (só os campos que vieram preenchidos)."""
-        if candidate.get("title"):
+    def autofill(self):
+        """Pega o resultado mais seguro (sem abrir a lista) e completa só os campos vazios."""
+        title, isbn = self.input_title.text().strip(), self.input_isbn.text().strip()
+        if not title and not isbn:
+            QMessageBox.warning(self, "Aviso", "Digite o título (ou o ISBN) antes de preencher automaticamente.")
+            return
+        authors = self.author_list()
+        self.btn_autofill.setEnabled(False)
+        self.btn_autofill.setText("Buscando...")
+        set_status(self.lbl_autofill, "muted", "Procurando este livro no Google Books / Open Library...")
+        self.lbl_autofill.setVisible(True)
+        run_async(self, api_client.lookup_best, self._on_autofill_found, self._on_autofill_failed,
+                  title, authors[0] if authors else None, isbn or None, preferences.google_books_key() or None)
+
+    def _reset_autofill_button(self):
+        self.btn_autofill.setEnabled(True)
+        self.btn_autofill.setText("Preencher automaticamente")
+
+    def _on_autofill_found(self, candidate):
+        self._reset_autofill_button()
+        if not candidate:
+            set_status(self.lbl_autofill, "error",
+                       "Nada encontrado com segurança. Use \"Buscar dados online\" para escolher entre os resultados.")
+            return
+        self.show_filled(self.apply_candidate(candidate, download_cover=True), candidate.get("source"))
+
+    def _on_autofill_failed(self, message: str):
+        self._reset_autofill_button()
+        set_status(self.lbl_autofill, "error", f"A busca falhou: {message}")
+
+    def show_filled(self, filled: List[str], source: Optional[str] = None) -> None:
+        self.lbl_autofill.setVisible(True)
+        origin = f" ({source})" if source else ""
+        if filled:
+            set_status(self.lbl_autofill, "ok", f"Preenchido{origin}: {', '.join(filled)}. Confira antes de salvar.")
+        else:
+            set_status(self.lbl_autofill, "muted", f"Livro encontrado{origin}, mas os campos já estavam preenchidos.")
+
+    @staticmethod
+    def _is_blank(text: str) -> bool:
+        return not (text or "").strip()
+
+    def apply_candidate(self, candidate: dict, download_cover: bool = False) -> List[str]:
+        """Completa o formulário com um resultado da busca online, só nos campos vazios.
+
+        Devolve os nomes do que foi preenchido. O que você já digitou nunca é trocado."""
+        filled = []
+        if self._is_blank(self.input_title.text()) and candidate.get("title"):
             self.input_title.setText(candidate["title"])
-        if candidate.get("authors"):
+            filled.append("título")
+        if not self.author_list() and candidate.get("authors"):
             self.input_authors.setText(", ".join(candidate["authors"]))
-        if candidate.get("publisher"):
+            filled.append("autor")
+        genres = candidate.get("genres") or []
+        if genres and self._is_blank(self.combo_genre.currentText()) and self._is_blank(self.combo_genre2.currentText()):
+            self.combo_genre.setEditText(genres[0])
+            self.combo_genre2.setEditText(genres[1] if len(genres) > 1 else "")
+            filled.append("gênero")
+        if candidate.get("series") and self._is_blank(self.combo_series.currentText()):
+            self.combo_series.setEditText(candidate["series"])
+            filled.append("série")
+        same_series = fold(self.combo_series.currentText().strip()) == fold(candidate.get("series") or "")
+        if candidate.get("series_number") and self.spin_series_number.value() == 0 and same_series:
+            self.spin_series_number.setValue(float(candidate["series_number"]))
+            if "série" not in filled:
+                filled.append("volume")
+        if candidate.get("publisher") and self._is_blank(self.combo_publisher.currentText()):
             self.combo_publisher.setEditText(candidate["publisher"])
-        if candidate.get("pages"):
+            filled.append("editora")
+        if candidate.get("pages") and not self.spin_pages.value():
             self.spin_pages.setValue(int(candidate["pages"]))
-        if candidate.get("language"):
+            filled.append("páginas")
+        if candidate.get("language") and self._is_blank(self.combo_language.currentText()):
             self.combo_language.setEditText(candidate["language"])
-        if candidate.get("isbn"):
+            filled.append("idioma")
+        if candidate.get("isbn") and self._is_blank(self.input_isbn.text()):
             self.input_isbn.setText(candidate["isbn"])
-        if download_cover and candidate.get("cover_url"):
+            filled.append("ISBN")
+        if download_cover and candidate.get("cover_url") and not self.cover_filename:
             self.download_cover_url(candidate["cover_url"])
+            filled.append("capa")
+        return filled
 
     # --- gravação ---
     def build_payload(self) -> dict:

@@ -29,7 +29,8 @@ status, o progresso em % enquanto você lê e, quando termina, a **data de térm
 
 - 📚 **Estante:** o que você está lendo em destaque (com a barra de progresso) e faixas com os próximos da fila, a lista de quero ler e os lidos recentemente.
 - 🔢 **Fila de Próximos:** ordem manual (arrastando ou com os botões), e "Começar a ler" com um clique.
-- 🔍 **Buscar dados online:** pelo título/autor ou ISBN no **Google Books** (com a **Open Library** como alternativa), preenchendo autor, editora, páginas, idioma, ISBN e capa.
+- 🪄 **Preencher automaticamente:** digite o título e o app completa sozinho o que estiver vazio — autor, gênero (traduzido para português), série e volume, editora, páginas, idioma, ISBN e capa — usando o resultado mais seguro do **Google Books** ou da **Open Library** (que prefere a edição brasileira). Também em lote, para os livros já cadastrados (Configurações → Busca e capas).
+- 🔍 **Buscar dados online:** mostra os resultados para você escolher, quando o automático não acerta.
 - ⭐ **Nota e término:** nota de 0 a 10 (meio ponto) e data de término, que vem preenchida com o dia de hoje.
 - 🔁 **Releituras:** cada nova leitura é um registro ligado ao original, com nota e data próprias, e entra no Anuário do ano em que foi lida.
 - 📅 **Anuário de leitura:** livros e páginas lidos por ano, média de notas, livros por mês, gêneros, autores e formatos mais lidos, destaques e o pódio do ano (top 3).

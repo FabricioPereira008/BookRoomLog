@@ -283,3 +283,65 @@ def test_cover_fetcher_thread(qapp, backend, add_book, monkeypatch):
     thread.batch_finished.connect(lambda *a: finished.append(a))
     thread.run()
     assert progress == [(1, 1, "Sem capa", True)] and finished == [(1, 1)]
+
+
+def test_autofill_thread(qapp, backend, add_book, monkeypatch):
+    from frontend_desktop.api_client.client import api_client
+    complete = dict(authors=["A"], genres=["G"], cover_image="c.jpg", pages=1, publisher="P", isbn="1",
+                    language="Português")
+    add_book(title="Completo", **complete)
+    first = add_book(title="Faltando 1")
+    second = add_book(title="Faltando 2")
+    add_book(title="Faltando 3")
+    results = {first["id"]: {"filled": ["autor"], "source": "Open Library"},
+               second["id"]: {"filled": [], "source": None}}
+
+    def fake_autofill(book_id, key=None):
+        if book_id not in results:
+            raise RuntimeError("429")
+        return results[book_id]
+    monkeypatch.setattr(api_client, "autofill_book", fake_autofill)
+    monkeypatch.setattr(sv.time, "sleep", lambda s: None)
+    thread = sv.AutofillThread("k")
+    progress, finished = [], []
+    thread.progress_updated.connect(lambda *a: progress.append(a))
+    thread.batch_finished.connect(lambda *a: finished.append(a))
+    thread.run()
+    assert [p[2] for p in progress] == ["Faltando 1", "Faltando 2", "Faltando 3"]
+    assert progress[0][3] == ["autor"] and finished == [(3, 1, 2)]
+
+    stopped = sv.AutofillThread()
+    stopped.stop()
+    stopped.batch_finished.connect(lambda *a: finished.append(a))
+    stopped.run()
+    assert finished[-1] == (0, 0, 0)
+
+    monkeypatch.setattr(api_client, "get_books", lambda: (_ for _ in ()).throw(RuntimeError("offline")))
+    broken = sv.AutofillThread()
+    broken.batch_finished.connect(lambda *a: finished.append(a))
+    broken.run()
+    assert finished[-1] == (0, 0, 0)
+
+
+def test_settings_autofill_ui(qapp, monkeypatch):
+    view = SettingsView()
+    started = []
+    monkeypatch.setattr(sv.AutofillThread, "start", lambda self: started.append(self))
+    view.start_autofill()
+    assert started and not view.btn_autofill.isEnabled() and not view.btn_stop_autofill.isHidden()
+    monkeypatch.setattr(sv.AutofillThread, "isRunning", lambda self: True)
+    view.start_autofill()  # já rodando: não começa outro
+    assert len(started) == 1
+    view.stop_autofill()
+    assert not view.autofill_thread.is_running and not view.btn_stop_autofill.isEnabled()
+    view.on_autofill_progress(1, 2, "Duna", ["autor", "gênero"])
+    assert "Duna — preenchido: autor, gênero" in view.lbl_autofill_status.text()
+    view.on_autofill_progress(2, 2, "Emma", [])
+    assert "nada novo" in view.lbl_autofill_status.text()
+    reloaded = []
+    view.data_imported.connect(lambda: reloaded.append(True))
+    view.on_autofill_finished(0, 0, 0)
+    assert "Nenhum livro" in view.lbl_autofill_status.text() and not reloaded
+    view.on_autofill_finished(2, 1, 1)
+    assert "1 de 2" in view.lbl_autofill_status.text() and reloaded and view.btn_autofill.isEnabled()
+    monkeypatch.setattr(sv.AutofillThread, "isRunning", lambda self: False)

@@ -2,6 +2,17 @@
 
 Todas as mudanças relevantes do BookRoomLog ficam registradas aqui.
 
+## [Não lançado]
+
+### Adicionado
+- **Preencher automaticamente** no cadastro: busca o livro (ISBN, ou título + autor) e completa só os campos vazios — autor, gênero, série e volume, editora, páginas, idioma, ISBN e capa — com o resultado mais seguro, mostrando o que foi preenchido.
+- **Completar dados faltantes** (Configurações → Busca e capas): faz o mesmo, em lote, para os livros já cadastrados, com progresso e botão de parar.
+- Gêneros das APIs (em inglês) traduzidos para gêneros em português (no máximo 2, reaproveitando a grafia dos já cadastrados) e série/volume lidos da Open Library e de padrões no título.
+
+### Alterado
+- A busca na Open Library acha também edições traduzidas ("Duna" para a obra "Dune") e prefere as edições em português (título, editora, ISBN e capa da edição brasileira).
+- "Buscar dados online" passa a preencher gênero e série e, como o preenchimento automático, nunca troca o que já foi digitado.
+
 ## [0.1.0] - 2026-10-25
 
 ### Adicionado

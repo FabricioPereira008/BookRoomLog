@@ -1,4 +1,4 @@
-from frontend_desktop.data_quality import is_incomplete, missing_fields
+from frontend_desktop.data_quality import autofill_gaps, is_incomplete, missing_fields
 from frontend_desktop.views import book_status as bs
 
 FULL = {"title": "Duna", "authors": [{"name": "Frank Herbert"}], "genres": [{"name": "Ficção"}],
@@ -22,3 +22,10 @@ def test_missing_fields():
     assert missing_fields({"status": "Lido"}) == ["autor", "gênero", "capa", "nº de páginas", "nota", "data de término"]
     assert "nº de páginas" not in missing_fields({"format": bs.AUDIOBOOK})
     assert missing_fields({**FULL, "status": "Quero Ler", "score": None}) == []
+
+
+def test_autofill_gaps():
+    complete = {**FULL, "publisher": {"name": "Ed"}, "isbn": "1", "language": "Português"}
+    assert autofill_gaps(complete) == []
+    assert autofill_gaps({}) == ["autor", "gênero", "capa", "páginas", "editora", "ISBN", "idioma"]
+    assert "páginas" not in autofill_gaps({"format": bs.AUDIOBOOK})

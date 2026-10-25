@@ -1,0 +1,178 @@
+name: Build & Release BookRoomLog
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    name: 🧪 Executar Testes Automatizados
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout do código
+        uses: actions/checkout@v4
+
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Instalar Dependências do Sistema para Testes Gráficos (Headless)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libgl1 libegl1 libxkbcommon-x11-0 libfontconfig1 libdbus-1-3 wget file
+
+      - name: Instalar Dependências Python
+        run: |
+          python -m pip install --upgrade pip
+          # Mesmas versões do executável (o PySide 6.12 derruba o processo ao fim dos testes)
+          pip install -r requirements-dev.txt -c constraints-build.txt
+
+      - name: Executar Pytest
+        run: |
+          pytest -v
+
+  build-linux:
+    name: 🐧 Build Linux AppImage
+    needs: test
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout do código
+        uses: actions/checkout@v4
+
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Instalar Dependências do Sistema
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libgl1 libegl1 libxkbcommon-x11-0 libfontconfig1 libdbus-1-3 wget file
+
+
+      - name: Instalar Dependências Python
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-build.txt -c constraints-build.txt
+
+      - name: Compilar Binário com PyInstaller
+        run: |
+          pyinstaller --clean bookroomlog.spec
+
+      - name: Montar Estrutura AppDir e Gerar AppImage
+        run: |
+          mkdir -p dist/AppDir/usr/bin
+          mkdir -p dist/AppDir/usr/share/icons/hicolor/256x256/apps
+          cp dist/bookroomlog dist/AppDir/usr/bin/bookroomlog
+          cp resources/bookroomlog.desktop dist/AppDir/bookroomlog.desktop
+          
+          if [ -f resources/icon.png ]; then
+            cp resources/icon.png dist/AppDir/bookroomlog.png
+            cp resources/icon.png dist/AppDir/usr/share/icons/hicolor/256x256/apps/bookroomlog.png
+          else
+            touch dist/AppDir/bookroomlog.png
+          fi
+
+          cat << 'EOF' > dist/AppDir/AppRun
+          #!/bin/sh
+          HERE="$(dirname "$(readlink -f "${0}")")"
+          export PATH="${HERE}/usr/bin:${PATH}"
+          export LD_LIBRARY_PATH="${HERE}/usr/lib:${LD_LIBRARY_PATH}"
+          exec "${HERE}/usr/bin/bookroomlog" "$@"
+          EOF
+          chmod +x dist/AppDir/AppRun
+
+          # appimagetool atual (runtime estático): roda com FUSE 3 ou sem FUSE.
+          # O AppImageKit "continuous" antigo gera runtime que exige libfuse.so.2 e não abre em distros sem ela.
+          wget -q -O dist/appimagetool https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
+          chmod +x dist/appimagetool
+
+          ARCH=x86_64 dist/appimagetool --appimage-extract-and-run dist/AppDir dist/BookRoomLog-x86_64.AppImage
+          chmod +x dist/BookRoomLog-x86_64.AppImage
+
+      - name: Verificar runtime do AppImage (estático, sem exigir libfuse.so.2)
+        run: |
+          # Runtime antigo (AppImageKit): ligado dinamicamente e faz dlopen de libfuse.so.2.
+          # Runtime atual: estático (nenhuma biblioteca NEEDED) e compatível com FUSE 3.
+          if readelf -d dist/BookRoomLog-x86_64.AppImage 2>/dev/null | grep -q "(NEEDED)"; then
+            echo "::error::Runtime do AppImage ligado dinamicamente (provável dependência de libfuse.so.2); use o appimagetool atual."
+            exit 1
+          fi
+          # O app deve iniciar a partir do AppImage extraído (smoke test headless)
+          dist/BookRoomLog-x86_64.AppImage --appimage-extract >/dev/null
+          BOOKROOM_DATA_DIR="$RUNNER_TEMP/br-data" QT_QPA_PLATFORM=offscreen timeout 20 squashfs-root/AppRun > smoke.log 2>&1 || true
+          cat smoke.log
+          grep -q "Backend FastAPI pronto" smoke.log
+
+      - name: Salvar Artefato AppImage
+        uses: actions/upload-artifact@v4
+        with:
+          name: BookRoomLog-Linux-AppImage
+          path: dist/BookRoomLog-x86_64.AppImage
+
+  build-windows:
+    name: 🪟 Build Windows .EXE
+    needs: test
+    runs-on: windows-latest
+    steps:
+      - name: Checkout do código
+        uses: actions/checkout@v4
+
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Instalar Dependências Python
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-build.txt -c constraints-build.txt
+
+      - name: Compilar Binário com PyInstaller
+        run: |
+          pyinstaller --clean bookroomlog.spec
+
+      - name: Compactar em ZIP para Windows
+        run: |
+          powershell -Command "Compress-Archive -Path dist\bookroomlog.exe, resources -DestinationPath dist\BookRoomLog-Windows-x64.zip -Force"
+
+      - name: Salvar Artefato Windows
+        uses: actions/upload-artifact@v4
+        with:
+          name: BookRoomLog-Windows-ZIP
+          path: dist/BookRoomLog-Windows-x64.zip
+
+  publish-release:
+    name: 🚀 Publicar no GitHub Release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [build-linux, build-windows]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Baixar Artefato Linux
+        uses: actions/download-artifact@v4
+        with:
+          name: BookRoomLog-Linux-AppImage
+          path: release-files
+
+      - name: Baixar Artefato Windows
+        uses: actions/download-artifact@v4
+        with:
+          name: BookRoomLog-Windows-ZIP
+          path: release-files
+
+      - name: Criar GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release-files/*
+          draft: false
+          prerelease: false
+          generate_release_notes: true

@@ -1,0 +1,54 @@
+# Byte-compiled / optimized files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Databases
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+bookroom.db
+backend/bookroom.db
+
+# Local storage and media (Covers & Uploads)
+backend/storage/covers/*
+!backend/storage/covers/.gitkeep
+backend/storage/*
+storage/
+
+# Testing & Cache
+.pytest_cache/
+.coverage
+htmlcov/
+
+# IDE & Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Temporary test scripts
+test_parse.py
+
+# Build and Distribution
+build/
+dist/
+*.egg-info/
+
+
+# Backups automáticos do banco (dev)
+backend/backups/

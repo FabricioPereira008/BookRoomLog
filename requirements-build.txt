@@ -1,0 +1,4 @@
+# Empacotamento (AppImage/Windows): pip install -r requirements-build.txt -c constraints-build.txt
+-r backend/requirements.txt
+-r frontend_desktop/requirements.txt
+pyinstaller>=6.6,<7

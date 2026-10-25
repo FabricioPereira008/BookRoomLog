@@ -1,0 +1,29 @@
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["backend/tests", "frontend_desktop/tests"]
+addopts = "-v"
+filterwarnings = ["ignore:Using `httpx` with `starlette.testclient`"]  # aviso do próprio Starlette (qualquer categoria)
+
+[tool.coverage.run]
+source = ["backend/app", "frontend_desktop"]
+omit = ["*/tests/*"]
+
+[tool.coverage.report]
+fail_under = 85
+show_missing = true
+
+[tool.ruff]
+target-version = "py311"
+extend-exclude = ["venv", "build", "dist", "backend/migrations/versions"]
+
+[tool.ruff.lint]
+# Só o que costuma ser bug de verdade: erros de sintaxe, nomes indefinidos/sem uso e armadilhas do bugbear
+select = ["E9", "F", "B"]
+ignore = [
+    "B008",  # QModelIndex() e modelos Pydantic como default de propósito
+    "B905",  # zip() sem strict: as listas zipadas aqui têm o mesmo tamanho por construção
+    "B904",  # raise HTTPException dentro de except: o encadeamento não acrescenta nada à resposta
+]
+
+[tool.ruff.lint.per-file-ignores]
+"*/tests/*" = ["B017"]  # pytest.raises(Exception) em testes de erro genérico do cliente HTTP

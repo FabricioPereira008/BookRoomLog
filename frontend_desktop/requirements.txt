@@ -1,0 +1,4 @@
+# Dependências de runtime do frontend desktop (faixas compatíveis; versões exatas do build em constraints-build.txt)
+PySide6>=6.6.0,<7
+requests>=2.31.0,<3
+pillow>=10.2.0,<13

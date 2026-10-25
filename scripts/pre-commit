@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+# BookRoomLog Git Pre-Commit Hook
+# Impede o commit caso o lint (ruff) ou algum teste automatizado (backend ou frontend) falhe.
+
+if [ -f "./venv/bin/ruff" ]; then
+    RUFF_BIN="./venv/bin/ruff"
+else
+    RUFF_BIN="ruff"
+fi
+
+echo "🧹 Verificando o código com ruff..."
+if ! $RUFF_BIN check .; then
+    echo "❌ COMMIT BLOQUEADO: o ruff encontrou problemas (muitos se corrigem com: $RUFF_BIN check --fix .)"
+    exit 1
+fi
+
+echo "🔍 Executando suíte de testes automatizados do BookRoomLog..."
+
+# Detecta se o ambiente virtual existe
+if [ -f "./venv/bin/pytest" ]; then
+    PYTEST_BIN="./venv/bin/pytest"
+else
+    PYTEST_BIN="pytest"
+fi
+
+# Executa todos os testes
+$PYTEST_BIN
+STATUS=$?
+
+if [ $STATUS -ne 0 ]; then
+    echo "❌ COMMIT BLOQUEADO: Os testes automatizados falharam!"
+    echo "💡 Corrija as falhas acima antes de realizar o commit."
+    exit 1
+fi
+
+echo "✅ Todos os testes passaram com sucesso! Prosseguindo com o commit."
+exit 0

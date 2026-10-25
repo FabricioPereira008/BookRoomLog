@@ -1,0 +1,10 @@
+[Desktop Entry]
+Name=BookRoomLog
+Comment=Registro de leituras: quero ler, próximos, lendo, lidos e anuário de leitura
+Exec=bookroomlog
+Icon=bookroomlog
+Terminal=false
+Type=Application
+Categories=Office;Utility;
+Keywords=books;livros;reading;leitura;kindle;
+StartupWMClass=BookRoomLog

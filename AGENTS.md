@@ -24,4 +24,5 @@ GameRoomLog (`../GameRoomLog-main`) e mantém a mesma arquitetura e os mesmos pa
 - Ao lançar uma nova versão, utilize o workflow definido na skill `.claude/skills/release-version/SKILL.md` ou execute o helper `.claude/skills/release-version/scripts/release.py <VERSAO>`.
 
 ## 4. Publicação no GitHub e Controle de Versão (Git Push)
+- **Sempre pelo GitHub CLI (`gh`):** toda operação no GitHub (push, PRs, issues, releases, Actions, consultas) segue a skill `.claude/skills/github-cli/SKILL.md`.
 - **Aprovação Prévia Obrigatória:** NUNCA execute `git push` (de branches ou tags) sem antes avisar o usuário, exibir claramente o resumo dos commits, tags e alterações que serão enviadas, e solicitar a aprovação explícita dele.
